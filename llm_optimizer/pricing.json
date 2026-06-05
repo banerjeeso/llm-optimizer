@@ -1,0 +1,118 @@
+{
+  "_meta": {
+    "version": "2026-04-03",
+    "last_updated": "2026-04-03",
+    "warning": "Provider pricing changes without notice. Verify at provider pricing pages before relying on cost estimates.",
+    "sources": {
+      "anthropic": "https://www.anthropic.com/pricing",
+      "openai": "https://openai.com/pricing",
+      "google": "https://ai.google.dev/pricing"
+    }
+  },
+  "models": {
+    "claude-haiku-4-5": {
+      "model_id": "claude-haiku-4-5-20251001",
+      "provider": "anthropic",
+      "display_name": "Claude Haiku 4.5",
+      "input_cost_per_1m": 1.0,
+      "output_cost_per_1m": 5.0,
+      "cached_input_cost_per_1m": 0.1,
+      "context_window": 200000,
+      "supports_caching": true,
+      "supports_batch": true,
+      "complexity_tiers": ["simple", "medium"],
+      "max_output_tokens": 8192
+    },
+    "claude-haiku-3-5": {
+      "model_id": "claude-haiku-3-5-20241022",
+      "provider": "anthropic",
+      "display_name": "Claude Haiku 3.5",
+      "input_cost_per_1m": 0.8,
+      "output_cost_per_1m": 4.0,
+      "cached_input_cost_per_1m": 0.08,
+      "context_window": 200000,
+      "supports_caching": true,
+      "supports_batch": true,
+      "complexity_tiers": ["simple", "medium"],
+      "max_output_tokens": 8192
+    },
+    "claude-sonnet-4": {
+      "model_id": "claude-sonnet-4-5",
+      "provider": "anthropic",
+      "display_name": "Claude Sonnet 4.5",
+      "input_cost_per_1m": 3.0,
+      "output_cost_per_1m": 15.0,
+      "cached_input_cost_per_1m": 0.3,
+      "context_window": 200000,
+      "supports_caching": true,
+      "supports_batch": true,
+      "complexity_tiers": ["simple", "medium", "complex"],
+      "max_output_tokens": 8192
+    },
+    "claude-opus-4": {
+      "model_id": "claude-opus-4-5",
+      "provider": "anthropic",
+      "display_name": "Claude Opus 4.5",
+      "input_cost_per_1m": 5.0,
+      "output_cost_per_1m": 25.0,
+      "cached_input_cost_per_1m": 0.5,
+      "context_window": 200000,
+      "supports_caching": true,
+      "supports_batch": true,
+      "complexity_tiers": ["simple", "medium", "complex", "expert"],
+      "max_output_tokens": 8192
+    },
+    "gpt-5-mini": {
+      "model_id": "gpt-5-mini",
+      "provider": "openai",
+      "display_name": "GPT-5 Mini",
+      "input_cost_per_1m": 0.25,
+      "output_cost_per_1m": 2.0,
+      "cached_input_cost_per_1m": 0.025,
+      "context_window": 400000,
+      "supports_caching": true,
+      "supports_batch": true,
+      "complexity_tiers": ["simple", "medium"],
+      "max_output_tokens": 16384
+    },
+    "gpt-5": {
+      "model_id": "gpt-5",
+      "provider": "openai",
+      "display_name": "GPT-5",
+      "input_cost_per_1m": 2.5,
+      "output_cost_per_1m": 15.0,
+      "cached_input_cost_per_1m": 0.25,
+      "context_window": 1000000,
+      "supports_caching": true,
+      "supports_batch": true,
+      "complexity_tiers": ["simple", "medium", "complex", "expert"],
+      "max_output_tokens": 32768
+    },
+    "gemini-flash": {
+      "model_id": "gemini-2.5-flash",
+      "provider": "google",
+      "display_name": "Gemini 2.5 Flash",
+      "input_cost_per_1m": 0.3,
+      "output_cost_per_1m": 2.5,
+      "cached_input_cost_per_1m": 0.03,
+      "context_window": 1000000,
+      "supports_caching": true,
+      "supports_batch": true,
+      "complexity_tiers": ["simple", "medium"],
+      "max_output_tokens": 8192
+    },
+    "gemini-pro": {
+      "model_id": "gemini-2.5-pro",
+      "provider": "google",
+      "display_name": "Gemini 2.5 Pro",
+      "input_cost_per_1m": 1.25,
+      "output_cost_per_1m": 10.0,
+      "cached_input_cost_per_1m": 0.125,
+      "context_window": 2000000,
+      "supports_caching": true,
+      "supports_batch": true,
+      "complexity_tiers": ["simple", "medium", "complex", "expert"],
+      "max_output_tokens": 8192
+    }
+  }
+}

@@ -1,15 +1,25 @@
 """
-Prompt Optimizer — reduces token count while preserving semantic meaning.
+Prompt Optimizer and Document Compressor.
 
-Techniques:
-  - Remove redundant whitespace and formatting
-  - Strip filler phrases and hedge words
-  - Compress verbose instructions
-  - Abbreviate common patterns (JSON structures, code boilerplate)
-  - Trim conversation history (keep most recent + summarize old)
+IMPORTANT — DocumentCompressor accuracy warning:
+  Document compression is a lossy operation. It reduces token count by
+  removing content. There is NO guarantee the removed content is irrelevant
+  to your query. Use only when:
+    (a) you have verified the strategy works for your document type, OR
+    (b) you accept that answers may be incomplete or wrong.
+
+  Strategies ranked by accuracy (best → worst):
+    "extractive"  — scores paragraphs by TF-IDF overlap with query; best accuracy
+    "smart"       — keeps first 60% + last 20% by position; decent for structured docs
+    "truncate"    — hard cutoff at max_tokens; worst accuracy, most predictable
+
+  All strategies emit a warning in the returned text so downstream code can
+  detect that compression occurred. The caller is responsible for deciding
+  whether to surface this to end users.
 """
 
 import re
+import math
 from dataclasses import dataclass
 from typing import Optional
 
@@ -27,7 +37,8 @@ class OptimizationResult:
     techniques_applied: list[str]
 
 
-# Filler phrases that add no semantic value
+# ─── Filler phrases that add no semantic value ─────────────────────────────────
+
 FILLER_PHRASES = [
     r'\bplease note that\b',
     r'\bit is important to note that\b',
@@ -38,14 +49,12 @@ FILLER_PHRASES = [
     r'\bwithout further ado\b',
     r'\bI hope this helps\b',
     r'\bfeel free to\b',
-    r'\bin order to\b',             # → "to"
-    r'\bdue to the fact that\b',    # → "because"
-    r'\bfor the purpose of\b',      # → "for"
-    r'\bat this point in time\b',   # → "now"
-    r'\bin the event that\b',       # → "if"
+    r'\bdue to the fact that\b',
+    r'\bfor the purpose of\b',
+    r'\bat this point in time\b',
+    r'\bin the event that\b',
 ]
 
-# Verbose → concise replacements
 VERBOSE_REPLACEMENTS = [
     (r'\bin order to\b', 'to'),
     (r'\bdue to the fact that\b', 'because'),
@@ -75,17 +84,17 @@ VERBOSE_REPLACEMENTS = [
 
 class PromptOptimizer:
     """
-    Reduces token count in prompts and system messages.
-    Non-destructive: always returns the optimized text, but
-    you can inspect OptimizationResult to see what changed.
+    Reduces token count in prompts via text normalization.
+    These transforms are low-risk (whitespace, filler phrases, verbose constructs).
+    Code blocks are always preserved.
     """
 
     def __init__(
         self,
         enabled: bool = True,
-        aggressive: bool = False,       # Apply more aggressive compression
-        preserve_code: bool = True,     # Don't modify code blocks
-        max_history_turns: int = 10,    # Max conversation turns to keep verbatim
+        aggressive: bool = False,
+        preserve_code: bool = True,
+        max_history_turns: int = 10,
     ):
         self.enabled = enabled
         self.aggressive = aggressive
@@ -93,35 +102,23 @@ class PromptOptimizer:
         self.max_history_turns = max_history_turns
 
     def optimize(self, text: str) -> OptimizationResult:
-        """Optimize a single text string."""
         if not self.enabled or not text:
             tokens = estimate_tokens(text)
-            return OptimizationResult(
-                original_text=text,
-                optimized_text=text,
-                original_tokens=tokens,
-                optimized_tokens=tokens,
-                tokens_saved=0,
-                savings_pct=0.0,
-                techniques_applied=[],
-            )
+            return OptimizationResult(text, text, tokens, tokens, 0, 0.0, [])
 
         original_tokens = estimate_tokens(text)
         optimized = text
         techniques: list[str] = []
 
-        # Extract and protect code blocks
         code_blocks: dict[str, str] = {}
         if self.preserve_code:
             optimized, code_blocks = self._extract_code_blocks(optimized)
 
-        # Apply optimizations
         new_text, new_techniques = self._apply_text_optimizations(optimized)
         if new_text != optimized:
             optimized = new_text
             techniques.extend(new_techniques)
 
-        # Restore code blocks
         if code_blocks:
             for placeholder, code in code_blocks.items():
                 optimized = optimized.replace(placeholder, code)
@@ -141,21 +138,12 @@ class PromptOptimizer:
         )
 
     def optimize_messages(self, messages: list[dict]) -> tuple[list[dict], int]:
-        """
-        Optimize a list of chat messages.
-        Also applies history truncation if conversation is long.
-
-        Returns:
-            (optimized_messages, total_tokens_saved)
-        """
         if not self.enabled:
             return messages, 0
 
         total_saved = 0
         optimized = []
-
-        # Trim history if needed
-        messages, was_trimmed = self._trim_history(messages)
+        messages, _ = self._trim_history(messages)
 
         for msg in messages:
             content = msg.get("content", "")
@@ -180,23 +168,19 @@ class PromptOptimizer:
 
     def _apply_text_optimizations(self, text: str) -> tuple[str, list[str]]:
         techniques = []
-
-        # 1. Normalize whitespace
-        new_text = re.sub(r'[ \t]+', ' ', text)              # Multiple spaces → one
-        new_text = re.sub(r'\n{3,}', '\n\n', new_text)       # 3+ newlines → 2
-        new_text = re.sub(r'[ \t]+\n', '\n', new_text)       # Trailing spaces
+        new_text = re.sub(r'[ \t]+', ' ', text)
+        new_text = re.sub(r'\n{3,}', '\n\n', new_text)
+        new_text = re.sub(r'[ \t]+\n', '\n', new_text)
         new_text = new_text.strip()
         if new_text != text:
             techniques.append("whitespace_normalization")
 
-        # 2. Remove filler phrases
         before = new_text
         for pattern in FILLER_PHRASES:
             new_text = re.sub(pattern, '', new_text, flags=re.IGNORECASE)
         if new_text != before:
             techniques.append("filler_phrase_removal")
 
-        # 3. Verbose → concise replacements
         before = new_text
         for pattern, replacement in VERBOSE_REPLACEMENTS:
             new_text = re.sub(pattern, replacement, new_text, flags=re.IGNORECASE)
@@ -204,27 +188,18 @@ class PromptOptimizer:
             techniques.append("verbose_phrase_compression")
 
         if self.aggressive:
-            # 4. Remove meta-commentary (e.g. "The following is a...")
             before = new_text
             new_text = re.sub(
                 r'^(The following (is|are|provides)|Here (is|are|follows)|Below (is|are))[\s\w]+:',
-                '',
-                new_text,
-                flags=re.MULTILINE | re.IGNORECASE,
+                '', new_text, flags=re.MULTILINE | re.IGNORECASE,
             )
             if new_text != before:
                 techniques.append("meta_commentary_removal")
 
-            # 5. Compress repetitive list markers (- - - → -)
-            new_text = re.sub(r'(\s*[-•]\s*){2,}', '\n- ', new_text)
-
-        # Final whitespace cleanup
         new_text = re.sub(r'\n{3,}', '\n\n', new_text).strip()
-
         return new_text, techniques
 
     def _extract_code_blocks(self, text: str) -> tuple[str, dict[str, str]]:
-        """Replace code blocks with placeholders to avoid modifying them."""
         code_blocks = {}
         counter = [0]
 
@@ -234,121 +209,213 @@ class PromptOptimizer:
             counter[0] += 1
             return key
 
-        # Match fenced code blocks (```...```) and inline code (`...`)
         result = re.sub(r'```[\s\S]*?```', replace, text)
         result = re.sub(r'`[^`]+`', replace, result)
         return result, code_blocks
 
     def _trim_history(self, messages: list[dict]) -> tuple[list[dict], bool]:
-        """
-        Trim conversation history to max_history_turns.
-        Keeps: system messages + last N turns.
-        """
         if len(messages) <= self.max_history_turns * 2:
             return messages, False
-
         system_msgs = [m for m in messages if m.get("role") == "system"]
         non_system = [m for m in messages if m.get("role") != "system"]
-
-        # Keep the most recent turns
-        keep_count = self.max_history_turns * 2
-        trimmed = non_system[-keep_count:]
-
+        trimmed = non_system[-(self.max_history_turns * 2):]
         return system_msgs + trimmed, True
+
+
+# ─── Document Compressor ───────────────────────────────────────────────────────
+
+COMPRESSION_WARNING = (
+    "\n\n[⚠️ COMPRESSION WARNING: This document was truncated to fit within the token "
+    "budget. Some content may have been removed. Answers based on this document "
+    "may be incomplete. Strategy used: {strategy}]"
+)
 
 
 class DocumentCompressor:
     """
-    Compresses long documents before sending to LLM.
-    Reduces cost by extracting only the relevant portions.
+    Compresses documents to fit within a token budget.
+
+    ⚠️  ACCURACY WARNING — read before using:
+        Compression removes content. There is no guarantee removed content
+        is irrelevant to your query. This feature trades accuracy for cost.
+
+        Recommended use cases:
+          - Background/reference documents where you need rough context
+          - RAG pipelines where you have re-ranking downstream
+          - Cases where you have empirically validated the strategy
+
+        Do NOT use blindly for:
+          - Legal or compliance documents (clauses matter)
+          - Code files (any removed line may be critical)
+          - Any task where completeness is required for correctness
+
+    Strategies:
+        "extractive"  Best accuracy. Scores paragraphs by TF-IDF overlap
+                      with the query. Requires a query string.
+        "smart"       Medium accuracy. Keeps beginning + end of document.
+                      Good for structured documents with summary upfront.
+        "truncate"    Lowest accuracy. Hard cutoff. Predictable data loss.
+
+    All strategies append a visible warning to the compressed text.
     """
 
-    def __init__(self, max_tokens: int = 4000, strategy: str = "smart"):
-        """
-        Args:
-            max_tokens: Target max tokens for compressed output
-            strategy: "truncate" | "smart" | "chunk"
-        """
+    def __init__(
+        self,
+        max_tokens: int = 4000,
+        strategy: str = "smart",
+        warn: bool = True,       # always True; set False only in tests
+    ):
+        if strategy not in ("extractive", "smart", "truncate"):
+            raise ValueError(f"Unknown strategy '{strategy}'. Choose: extractive, smart, truncate")
         self.max_tokens = max_tokens
         self.strategy = strategy
+        self.warn = warn
 
     def compress(self, document: str, query: Optional[str] = None) -> tuple[str, int]:
         """
-        Compress a document to fit within token budget.
+        Compress document to fit within max_tokens.
+
+        Args:
+            document: The source document text
+            query:    Query string for relevance-based compression (required for 'extractive')
 
         Returns:
             (compressed_text, tokens_saved)
+
+        Note:
+            Returns original document unchanged if it already fits within max_tokens.
         """
         original_tokens = estimate_tokens(document)
         if original_tokens <= self.max_tokens:
             return document, 0
 
-        if self.strategy == "truncate":
-            compressed = self._truncate(document)
+        if self.strategy == "extractive":
+            if not query:
+                # Fall back to smart without crashing
+                compressed = self._smart_extract(document, query=None)
+                effective_strategy = "smart (extractive requested but no query provided)"
+            else:
+                compressed = self._extractive(document, query)
+                effective_strategy = "extractive"
         elif self.strategy == "smart":
             compressed = self._smart_extract(document, query)
-        else:  # chunk
-            compressed = self._chunk_first(document)
+            effective_strategy = "smart"
+        else:
+            compressed = self._truncate(document)
+            effective_strategy = "truncate"
+
+        if self.warn:
+            compressed += COMPRESSION_WARNING.format(strategy=effective_strategy)
 
         compressed_tokens = estimate_tokens(compressed)
-        tokens_saved = original_tokens - compressed_tokens
+        tokens_saved = max(0, original_tokens - compressed_tokens)
         return compressed, tokens_saved
 
     def _truncate(self, text: str) -> str:
-        """Simple truncation to max_tokens."""
+        """Hard cutoff. Predictable but loses everything after the limit."""
         words = text.split()
-        # ~1.3 tokens per word
         max_words = int(self.max_tokens / 1.3)
         if len(words) > max_words:
-            truncated = " ".join(words[:max_words])
-            return truncated + "\n\n[... document truncated ...]"
+            return " ".join(words[:max_words])
         return text
 
-    def _smart_extract(self, text: str, query: Optional[str] = None) -> str:
+    def _smart_extract(self, text: str, query: Optional[str]) -> str:
         """
-        Extract most relevant paragraphs.
-        Without a query: keep beginning + end (executive summary style).
-        With a query: score paragraphs by keyword overlap.
+        Position-based extraction: keep beginning (60%) + end (20%) of paragraphs.
+        Rationale: most documents front-load key information and end with conclusions.
+        Not query-aware — use extractive for better accuracy with a known query.
         """
         paragraphs = [p.strip() for p in re.split(r'\n{2,}', text) if p.strip()]
-
         if not paragraphs:
             return self._truncate(text)
 
         max_words = int(self.max_tokens / 1.3)
+        n = len(paragraphs)
+        keep_start = int(n * 0.6)
+        keep_end = max(1, int(n * 0.2))
+        selected = list(range(keep_start)) + list(range(n - keep_end, n))
+        selected = sorted(set(selected))
 
-        if query:
-            query_words = set(re.findall(r'\b\w+\b', query.lower()))
-            scored = []
-            for i, para in enumerate(paragraphs):
-                para_words = set(re.findall(r'\b\w+\b', para.lower()))
-                overlap = len(query_words & para_words)
-                # Favor paragraphs near start
-                position_bonus = 1.0 if i < 3 else (0.5 if i < 10 else 0.2)
-                score = overlap * position_bonus
-                scored.append((score, i, para))
-            scored.sort(key=lambda x: (-x[0], x[1]))  # sort by score, preserve order
-        else:
-            # Without query: keep first 60% + last 20%
-            n = len(paragraphs)
-            keep_start = int(n * 0.6)
-            keep_end = int(n * 0.2)
-            selected_indices = set(range(keep_start)) | set(range(n - keep_end, n))
-            scored = [(0, i, p) for i, p in enumerate(paragraphs) if i in selected_indices]
-
-        # Build result respecting token budget
-        result_paragraphs = []
-        word_count = 0
-        for _, idx, para in sorted(scored, key=lambda x: x[1]):
-            para_words = len(para.split())
+        result, word_count = [], 0
+        for i in selected:
+            para_words = len(paragraphs[i].split())
             if word_count + para_words > max_words:
                 break
-            result_paragraphs.append((idx, para))
+            result.append(paragraphs[i])
             word_count += para_words
 
-        result_paragraphs.sort(key=lambda x: x[0])
-        return "\n\n".join(p for _, p in result_paragraphs)
+        return "\n\n".join(result)
 
-    def _chunk_first(self, text: str) -> str:
-        """Return only the first chunk up to max_tokens."""
-        return self._truncate(text)
+    def _extractive(self, text: str, query: str) -> str:
+        """
+        TF-IDF paragraph scoring against query.
+        Most accurate strategy — keeps paragraphs most relevant to the query.
+
+        Algorithm:
+          1. Split document into paragraphs
+          2. Build TF-IDF scores for each paragraph word
+          3. Score each paragraph by overlap with query terms (IDF-weighted)
+          4. Sort by score descending, fill token budget, restore original order
+        """
+        paragraphs = [p.strip() for p in re.split(r'\n{2,}', text) if p.strip()]
+        if not paragraphs:
+            return self._truncate(text)
+
+        query_terms = set(re.findall(r'\b\w+\b', query.lower())) - _STOPWORDS
+
+        # Compute IDF across paragraphs
+        df: dict[str, int] = {}
+        for para in paragraphs:
+            terms = set(re.findall(r'\b\w+\b', para.lower()))
+            for t in terms:
+                df[t] = df.get(t, 0) + 1
+
+        n = len(paragraphs)
+
+        def score(para: str, idx: int) -> float:
+            terms = re.findall(r'\b\w+\b', para.lower())
+            tf: dict[str, float] = {}
+            for t in terms:
+                tf[t] = tf.get(t, 0) + 1
+            if terms:
+                for t in tf:
+                    tf[t] /= len(terms)
+
+            s = 0.0
+            for qt in query_terms:
+                if qt in tf:
+                    idf = math.log((n + 1) / (df.get(qt, 0) + 1)) + 1
+                    s += tf[qt] * idf
+            # Position bonus: first 3 paragraphs are often most important
+            position_bonus = 1.5 if idx < 3 else 1.0
+            return s * position_bonus
+
+        scored = [(score(p, i), i, p) for i, p in enumerate(paragraphs)]
+        scored.sort(key=lambda x: -x[0])
+
+        max_words = int(self.max_tokens / 1.3)
+        selected: list[tuple[int, str]] = []
+        word_count = 0
+
+        for _, idx, para in scored:
+            pw = len(para.split())
+            if word_count + pw > max_words:
+                break
+            selected.append((idx, para))
+            word_count += pw
+
+        # Restore original document order
+        selected.sort(key=lambda x: x[0])
+        return "\n\n".join(p for _, p in selected)
+
+
+# Common English stopwords — excluded from TF-IDF scoring
+_STOPWORDS = {
+    "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for",
+    "of", "with", "by", "from", "is", "are", "was", "were", "be", "been",
+    "being", "have", "has", "had", "do", "does", "did", "will", "would",
+    "could", "should", "may", "might", "shall", "can", "this", "that",
+    "these", "those", "it", "its", "as", "if", "not", "no", "so", "than",
+    "then", "when", "where", "which", "who", "what", "how", "all", "any",
+    "both", "each", "few", "more", "most", "other", "some", "such",
+}
