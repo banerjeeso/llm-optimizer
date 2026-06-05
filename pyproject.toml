@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-optimizer"
+version = "0.2.0"
+description = "Reduce LLM API costs by up to 90% — prompt caching, smart routing, batch processing, and more"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [{ name = "Somnath Banerjee", email = "banerjso30@gmail.com" }]
+keywords = ["llm", "anthropic", "openai", "cost", "optimization", "token", "caching", "batch"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Intended Audience :: Developers",
+]
+dependencies = [
+    "anthropic>=0.40.0",
+]
+
+[project.optional-dependencies]
+openai   = ["openai>=1.0.0"]
+google   = ["google-generativeai>=0.5.0"]
+tiktoken = ["tiktoken>=0.7.0"]
+all      = ["openai>=1.0.0", "google-generativeai>=0.5.0", "tiktoken>=0.7.0"]
+dev      = ["pytest>=8.0", "build", "twine"]
+
+[project.urls]
+Homepage      = "https://github.com/banerjeeso/llm-optimizer"
+Documentation = "https://github.com/banerjeeso/llm-optimizer#readme"
+Issues        = "https://github.com/banerjeeso/llm-optimizer/issues"
+
+[project.scripts]
+llm-optimizer = "llm_optimizer.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["llm_optimizer*"]
+
+[tool.setuptools.package-data]
+llm_optimizer = ["pricing.json"]
