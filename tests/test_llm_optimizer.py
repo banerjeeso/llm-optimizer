@@ -548,3 +548,168 @@ class TestStreaming:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "-m", "not integration"])
+
+
+
+# ─── Bedrock Client (unit, mocked) ────────────────────────────────────────────
+
+class TestBedrockClient:
+    """
+    Tests BedrockClient with mocked boto3. No real AWS calls made.
+
+    Covers:
+      - Both auth patterns (profile_name and env/role)
+      - cache_control stripping
+      - Response shape normalization
+      - Discount multiplier
+      - OptimizedClient integration with Bedrock
+      - Correct model IDs for company Bedrock setup
+    """
+
+    def _mock_runtime(self, response_text="Test response"):
+        import json
+        from unittest.mock import MagicMock
+        mock = MagicMock()
+        body = {
+            "content": [{"type": "text", "text": response_text}],
+            "usage": {"input_tokens": 100, "output_tokens": 50},
+            "stop_reason": "end_turn",
+        }
+        mock.invoke_model.return_value = {
+            "body": MagicMock(read=lambda: json.dumps(body).encode())
+        }
+        return mock
+
+    def test_instantiates_with_profile(self):
+        from llm_optimizer.bedrock import BedrockClient
+        c = BedrockClient(region="us-east-1", profile_name="ai-core")
+        assert c.region == "us-east-1"
+        assert c._profile == "ai-core"
+
+    def test_instantiates_without_profile(self):
+        """Env vars / IAM role path — zero config."""
+        from llm_optimizer.bedrock import BedrockClient
+        c = BedrockClient()
+        assert c._profile is None
+        assert c.region == "us-east-1"
+
+    def test_discount_multiplier(self):
+        from llm_optimizer.bedrock import BedrockClient
+        c = BedrockClient(discount_pct=16.0)
+        assert abs(c.effective_cost_multiplier() - 0.84) < 0.001
+
+    def test_no_discount_multiplier_is_one(self):
+        from llm_optimizer.bedrock import BedrockClient
+        c = BedrockClient(discount_pct=0.0)
+        assert c.effective_cost_multiplier() == 1.0
+
+    def test_strip_cache_control_removes_key(self):
+        from llm_optimizer.bedrock import BedrockClient
+        msgs = [{"role": "user", "content": [
+            {"type": "text", "text": "Hello", "cache_control": {"type": "ephemeral"}}
+        ]}]
+        cleaned = BedrockClient._strip_cache_control(msgs)
+        assert "cache_control" not in cleaned[0]["content"][0]
+        assert cleaned[0]["content"][0]["text"] == "Hello"
+
+    def test_strip_cache_control_plain_string_unchanged(self):
+        from llm_optimizer.bedrock import BedrockClient
+        msgs = [{"role": "user", "content": "Hello"}]
+        cleaned = BedrockClient._strip_cache_control(msgs)
+        assert cleaned[0]["content"] == "Hello"
+
+    def test_strip_cache_control_preserves_other_keys(self):
+        from llm_optimizer.bedrock import BedrockClient
+        msgs = [{"role": "user", "content": [
+            {"type": "text", "text": "Hi", "cache_control": {"type": "ephemeral"}, "extra": "keep"}
+        ]}]
+        cleaned = BedrockClient._strip_cache_control(msgs)
+        assert cleaned[0]["content"][0]["extra"] == "keep"
+        assert "cache_control" not in cleaned[0]["content"][0]
+
+    def test_response_shape_normalized(self):
+        from llm_optimizer.bedrock import BedrockClient, BedrockResponse
+        c = BedrockClient(region="us-east-1")
+        c._runtime = self._mock_runtime("Hello from Bedrock")
+        resp = c.messages.create(
+            model="anthropic.claude-haiku-4-5-20251001-v1:0",
+            max_tokens=100,
+            messages=[{"role": "user", "content": "Hi"}],
+        )
+        assert isinstance(resp, BedrockResponse)
+        assert resp.content[0].text == "Hello from Bedrock"
+        assert resp.usage.input_tokens == 100
+        assert resp.usage.output_tokens == 50
+        assert resp.usage.cache_read_input_tokens == 0
+
+    def test_correct_haiku_model_id(self):
+        """Company uses this exact Bedrock model ID for Haiku."""
+        assert MODELS["bedrock-claude-haiku-4-5"].model_id == "anthropic.claude-haiku-4-5-20251001-v1:0"
+
+    def test_correct_sonnet_model_id(self):
+        """Company uses this exact Bedrock model ID for Sonnet."""
+        assert MODELS["bedrock-claude-sonnet-4-5"].model_id == "anthropic.claude-sonnet-4-5-20250929-v1:0"
+
+    def test_bedrock_haiku_pricing(self):
+        """Bedrock Haiku 4.5 AWS list price."""
+        m = MODELS["bedrock-claude-haiku-4-5"]
+        assert m.input_cost_per_1m == 0.80
+        assert m.output_cost_per_1m == 4.00
+
+    def test_bedrock_sonnet_pricing(self):
+        """Bedrock Sonnet 4.5 AWS list price."""
+        m = MODELS["bedrock-claude-sonnet-4-5"]
+        assert m.input_cost_per_1m == 3.00
+        assert m.output_cost_per_1m == 15.00
+
+    def test_bedrock_caching_not_supported(self):
+        """Bedrock models must have supports_caching=False."""
+        assert MODELS["bedrock-claude-haiku-4-5"].supports_caching is False
+        assert MODELS["bedrock-claude-sonnet-4-5"].supports_caching is False
+
+    def test_optimized_client_with_bedrock_profile(self):
+        """Full integration: OptimizedClient + BedrockClient with profile."""
+        from llm_optimizer.bedrock import BedrockClient
+        import json
+        from unittest.mock import MagicMock
+
+        bedrock = BedrockClient(region="us-east-1", profile_name="ai-core")
+        bedrock._runtime = self._mock_runtime("Classified as SPAM")
+
+        client = OptimizedClient(
+            bedrock_client=bedrock,
+            preferred_provider=Provider.BEDROCK,
+        )
+        resp = client.complete(
+            messages=[{"role": "user", "content": "Is this spam?"}],
+            system="You are a classifier.",
+            model="bedrock-claude-haiku-4-5",
+        )
+        assert resp.content[0].text == "Classified as SPAM"
+        bedrock._runtime.invoke_model.assert_called_once()
+
+    def test_optimized_client_no_bedrock_raises(self):
+        """Clear error when Bedrock client not provided."""
+        client = OptimizedClient(preferred_provider=Provider.BEDROCK)
+        with pytest.raises(RuntimeError, match="No Bedrock client"):
+            client.complete(
+                messages=[{"role": "user", "content": "Hello"}],
+                model="bedrock-claude-haiku-4-5",
+            )
+
+    def test_make_bedrock_client_factory(self):
+        from llm_optimizer.bedrock import make_bedrock_client
+        c = make_bedrock_client(profile_name="ai-core", discount_pct=16.0)
+        assert c._profile == "ai-core"
+        assert c.discount_pct == 16.0
+
+    def test_make_bedrock_client_no_args(self):
+        """Zero-config factory for env/role auth."""
+        from llm_optimizer.bedrock import make_bedrock_client
+        c = make_bedrock_client()
+        assert c._profile is None
+
+    def test_bedrock_provider_in_tier_defaults(self):
+        from llm_optimizer.models import TIER_DEFAULTS
+        assert Provider.BEDROCK in TIER_DEFAULTS[TaskComplexity.SIMPLE]
+        assert Provider.BEDROCK in TIER_DEFAULTS[TaskComplexity.COMPLEX]

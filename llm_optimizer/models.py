@@ -30,6 +30,7 @@ class Provider(Enum):
     ANTHROPIC = "anthropic"
     OPENAI = "openai"
     GOOGLE = "google"
+    BEDROCK = "bedrock"
 
 
 @dataclass
@@ -144,3 +145,23 @@ TIER_DEFAULTS: dict[TaskComplexity, dict[Provider, str]] = {
         Provider.GOOGLE: "gemini-pro",
     },
 }
+
+# Bedrock tier defaults (appended for v0.3.0)
+TIER_DEFAULTS.update({
+    TaskComplexity.SIMPLE: {
+        **TIER_DEFAULTS.get(TaskComplexity.SIMPLE, {}),
+        Provider.BEDROCK: "bedrock-claude-haiku-4-5",
+    },
+    TaskComplexity.MEDIUM: {
+        **TIER_DEFAULTS.get(TaskComplexity.MEDIUM, {}),
+        Provider.BEDROCK: "bedrock-claude-haiku-4-5",
+    },
+    TaskComplexity.COMPLEX: {
+        **TIER_DEFAULTS.get(TaskComplexity.COMPLEX, {}),
+        Provider.BEDROCK: "bedrock-claude-sonnet-4-5",
+    },
+    TaskComplexity.EXPERT: {
+        **TIER_DEFAULTS.get(TaskComplexity.EXPERT, {}),
+        Provider.BEDROCK: "bedrock-claude-haiku-4-5",
+    },
+})

@@ -25,7 +25,7 @@ from .router import ModelRouter
 from .optimizer import PromptOptimizer, DocumentCompressor
 from .batcher import BatchProcessor
 from .tracker import CostTracker, estimate_tokens
-from .streaming import StreamResult, build_anthropic_stream, build_openai_stream
+from .streaming import StreamResult, build_anthropic_stream, build_openai_stream, build_bedrock_stream
 
 
 class OptimizedClient:
@@ -55,6 +55,7 @@ class OptimizedClient:
     def __init__(
         self,
         anthropic_client=None,
+        bedrock_client=None,
         openai_client=None,
         google_client=None,
         # Feature flags
@@ -83,6 +84,7 @@ class OptimizedClient:
         batch_default_model: Optional[str] = None,
     ):
         self._anthropic = anthropic_client
+        self._bedrock = bedrock_client
         self._openai = openai_client
         self._google = google_client
         self._default_model = default_model
@@ -255,10 +257,18 @@ class OptimizedClient:
                 self._openai, model_config.model_id, messages,
                 system_blocks, max_tokens, temperature, **kwargs
             )
+        elif provider == Provider.BEDROCK:
+            if not self._bedrock:
+                raise RuntimeError("No Bedrock client. Pass bedrock_client=BedrockClient() to OptimizedClient.")
+            from .streaming import build_bedrock_stream
+            result = build_bedrock_stream(
+                self._bedrock, model_config.model_id, messages,
+                system_blocks, max_tokens, temperature, **kwargs
+            )
         else:
             raise NotImplementedError(
                 f"Streaming is not yet supported for provider: {provider.value}. "
-                "Supported: anthropic, openai."
+                "Supported: anthropic, openai, bedrock."
             )
 
         return result
@@ -453,6 +463,8 @@ class OptimizedClient:
             return self._call_openai(model_config, messages, system, max_tokens, temperature, **kwargs)
         elif provider == Provider.GOOGLE:
             return self._call_google(model_config, messages, system, max_tokens, temperature, **kwargs)
+        elif provider == Provider.BEDROCK:
+            return self._call_bedrock(model_config, messages, system, max_tokens, temperature, **kwargs)
         else:
             raise ValueError(f"Unsupported provider: {provider}")
 
@@ -498,6 +510,22 @@ class OptimizedClient:
             for m in messages
         )
         return self._google.generate_content(prompt)
+
+
+    def _call_bedrock(self, model_config, messages, system, max_tokens, temperature, **kwargs):
+        if not self._bedrock:
+            raise RuntimeError(
+                "No Bedrock client. Pass bedrock_client=BedrockClient() to OptimizedClient.\n"
+                "from llm_optimizer.bedrock import BedrockClient\n"
+                "bedrock = BedrockClient(region='us-east-1', profile_name='ai-core')"
+            )
+        return self._bedrock.messages.create(
+            model=model_config.model_id,
+            max_tokens=max_tokens,
+            messages=messages,
+            system=system,
+            **kwargs,
+        )
 
     @staticmethod
     def _extract_usage(response) -> tuple[int, int, int]:

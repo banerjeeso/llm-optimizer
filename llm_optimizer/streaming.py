@@ -36,6 +36,8 @@ class StreamResult:
             yield from self._iter_anthropic()
         elif self._provider == "openai":
             yield from self._iter_openai()
+        elif self._provider == "bedrock":
+            yield from self._iter_bedrock()
         else:
             raise NotImplementedError(f"Streaming not implemented for provider: {self._provider}")
 
@@ -74,6 +76,17 @@ class StreamResult:
         if not self._finished:
             return None
         return self._usage
+
+    def _iter_bedrock(self):
+        for chunk in self._raw:
+            yield chunk
+        if hasattr(self._raw, 'usage') and self._raw.usage:
+            self._usage = {
+                "input_tokens": self._raw.usage.input_tokens,
+                "output_tokens": self._raw.usage.output_tokens,
+                "cache_read_input_tokens": 0,
+            }
+        self._finished = True
 
     def __enter__(self):
         return self
@@ -118,3 +131,16 @@ def build_openai_stream(client, model_id: str, messages: list, system: Optional[
         **kwargs,
     )
     return StreamResult(raw, provider="openai")
+
+
+def build_bedrock_stream(bedrock_client, model_id: str, messages: list,
+                          system, max_tokens: int, temperature: float, **kwargs) -> "StreamResult":
+    """Create a Bedrock streaming request."""
+    raw = bedrock_client.messages.stream(
+        model=model_id,
+        max_tokens=max_tokens,
+        messages=messages,
+        system=system,
+        **kwargs,
+    )
+    return StreamResult(raw, provider="bedrock")

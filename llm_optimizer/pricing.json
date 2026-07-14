@@ -1,13 +1,15 @@
 {
   "_meta": {
-    "version": "2026-04-03",
-    "last_updated": "2026-04-03",
+    "version": "2026-07-14",
+    "last_updated": "2026-07-14",
     "warning": "Provider pricing changes without notice. Verify at provider pricing pages before relying on cost estimates.",
     "sources": {
       "anthropic": "https://www.anthropic.com/pricing",
       "openai": "https://openai.com/pricing",
-      "google": "https://ai.google.dev/pricing"
-    }
+      "google": "https://ai.google.dev/pricing",
+      "bedrock": "https://aws.amazon.com/bedrock/pricing/"
+    },
+    "bedrock_note": "Bedrock prices = AWS list price. If your account has a negotiated discount (e.g. 16%), set discount_pct in BedrockClient to apply it to cost estimates."
   },
   "models": {
     "claude-haiku-4-5": {
@@ -20,7 +22,10 @@
       "context_window": 200000,
       "supports_caching": true,
       "supports_batch": true,
-      "complexity_tiers": ["simple", "medium"],
+      "complexity_tiers": [
+        "simple",
+        "medium"
+      ],
       "max_output_tokens": 8192
     },
     "claude-haiku-3-5": {
@@ -33,7 +38,10 @@
       "context_window": 200000,
       "supports_caching": true,
       "supports_batch": true,
-      "complexity_tiers": ["simple", "medium"],
+      "complexity_tiers": [
+        "simple",
+        "medium"
+      ],
       "max_output_tokens": 8192
     },
     "claude-sonnet-4": {
@@ -46,7 +54,11 @@
       "context_window": 200000,
       "supports_caching": true,
       "supports_batch": true,
-      "complexity_tiers": ["simple", "medium", "complex"],
+      "complexity_tiers": [
+        "simple",
+        "medium",
+        "complex"
+      ],
       "max_output_tokens": 8192
     },
     "claude-opus-4": {
@@ -59,7 +71,12 @@
       "context_window": 200000,
       "supports_caching": true,
       "supports_batch": true,
-      "complexity_tiers": ["simple", "medium", "complex", "expert"],
+      "complexity_tiers": [
+        "simple",
+        "medium",
+        "complex",
+        "expert"
+      ],
       "max_output_tokens": 8192
     },
     "gpt-5-mini": {
@@ -72,7 +89,10 @@
       "context_window": 400000,
       "supports_caching": true,
       "supports_batch": true,
-      "complexity_tiers": ["simple", "medium"],
+      "complexity_tiers": [
+        "simple",
+        "medium"
+      ],
       "max_output_tokens": 16384
     },
     "gpt-5": {
@@ -85,7 +105,12 @@
       "context_window": 1000000,
       "supports_caching": true,
       "supports_batch": true,
-      "complexity_tiers": ["simple", "medium", "complex", "expert"],
+      "complexity_tiers": [
+        "simple",
+        "medium",
+        "complex",
+        "expert"
+      ],
       "max_output_tokens": 32768
     },
     "gemini-flash": {
@@ -98,7 +123,10 @@
       "context_window": 1000000,
       "supports_caching": true,
       "supports_batch": true,
-      "complexity_tiers": ["simple", "medium"],
+      "complexity_tiers": [
+        "simple",
+        "medium"
+      ],
       "max_output_tokens": 8192
     },
     "gemini-pro": {
@@ -111,8 +139,48 @@
       "context_window": 2000000,
       "supports_caching": true,
       "supports_batch": true,
-      "complexity_tiers": ["simple", "medium", "complex", "expert"],
+      "complexity_tiers": [
+        "simple",
+        "medium",
+        "complex",
+        "expert"
+      ],
       "max_output_tokens": 8192
+    },
+    "bedrock-claude-haiku-4-5": {
+      "model_id": "anthropic.claude-haiku-4-5-20251001-v1:0",
+      "provider": "bedrock",
+      "display_name": "Claude Haiku 4.5 (Bedrock)",
+      "input_cost_per_1m": 0.8,
+      "output_cost_per_1m": 4.0,
+      "cached_input_cost_per_1m": 0.08,
+      "context_window": 200000,
+      "supports_caching": false,
+      "supports_batch": true,
+      "complexity_tiers": [
+        "simple",
+        "medium"
+      ],
+      "max_output_tokens": 8192,
+      "notes": "AWS Bedrock list price. Prompt caching not supported on Bedrock. Your account discount applies on top."
+    },
+    "bedrock-claude-sonnet-4-5": {
+      "model_id": "anthropic.claude-sonnet-4-5-20250929-v1:0",
+      "provider": "bedrock",
+      "display_name": "Claude Sonnet 4.5 (Bedrock)",
+      "input_cost_per_1m": 3.0,
+      "output_cost_per_1m": 15.0,
+      "cached_input_cost_per_1m": 0.3,
+      "context_window": 200000,
+      "supports_caching": false,
+      "supports_batch": true,
+      "complexity_tiers": [
+        "simple",
+        "medium",
+        "complex"
+      ],
+      "max_output_tokens": 8192,
+      "notes": "AWS Bedrock list price. Prompt caching not supported on Bedrock. Your account discount applies on top."
     }
   }
 }

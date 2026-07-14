@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llm-optimizer"
-version = "0.2.0"
+version = "0.3.1"
 description = "Reduce LLM API costs by up to 90% — prompt caching, smart routing, batch processing, and more"
 readme = "README.md"
 license = { text = "MIT" }
@@ -29,11 +29,12 @@ dependencies = [
 openai   = ["openai>=1.0.0"]
 google   = ["google-generativeai>=0.5.0"]
 tiktoken = ["tiktoken>=0.7.0"]
-all      = ["openai>=1.0.0", "google-generativeai>=0.5.0", "tiktoken>=0.7.0"]
+all      = ["openai>=1.0.0", "google-generativeai>=0.5.0", "tiktoken>=0.7.0", "boto3>=1.34.0"]
+bedrock  = ["boto3>=1.34.0"]
 dev      = ["pytest>=8.0", "build", "twine"]
 
 [project.urls]
-Homepage      = "https://github.com/banerjeeso/llm-optimizer"
+Homepage      = "https://github.com/banerjeesollm-optimizer"
 Documentation = "https://github.com/banerjeeso/llm-optimizer#readme"
 Issues        = "https://github.com/banerjeeso/llm-optimizer/issues"
 
