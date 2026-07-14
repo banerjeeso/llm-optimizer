@@ -525,6 +525,33 @@ tests/
 
 ## Changelog
 
+## v0.3.1
+
+### Added
+- AWS Bedrock support via `BedrockClient` and `make_bedrock_client` factory
+- Both auth patterns supported — AWS profile (`profile_name="ai-core"`) and env vars / IAM role
+- Bedrock model registry — Claude Haiku 4.5 and Sonnet 4.5 with correct AWS model IDs
+- Bedrock pricing in `pricing.json` — AWS list rates, separate from Anthropic.com pricing
+- `discount_pct` parameter on `BedrockClient` for negotiated AWS account discounts
+- `Provider.BEDROCK` added to provider enum
+- Bedrock entries added to `TIER_DEFAULTS` for all four complexity tiers
+- 17 new unit tests covering Bedrock integration
+
+### Fixed
+- GitHub repository URL corrected in `pyproject.toml`
+- `cache_control` blocks now stripped automatically before Bedrock requests
+
+### Notes
+- Prompt caching is not supported on AWS Bedrock — `cache_control` is silently removed
+- Bedrock batch processing uses Bedrock Batch Inference, not Anthropic Batch API (planned for v0.4.0)
+
+---
+
+## v0.3.0
+
+### Added
+- AWS Bedrock scaffolding (incomplete — superseded by v0.3.1)
+
 ### v0.2.0
 
 - **Streaming** — `client.stream()` added for Anthropic and OpenAI
