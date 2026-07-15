@@ -26,6 +26,15 @@ from .optimizer import PromptOptimizer, DocumentCompressor
 from .batcher import BatchProcessor
 from .tracker import CostTracker, estimate_tokens
 from .streaming import StreamResult, build_anthropic_stream, build_openai_stream, build_bedrock_stream
+from .budget import BudgetGuard, BudgetExceededError
+from .cache import OutputCache, CachedResponse, make_cache_key, extract_text_from_response
+from .history import HistorySummarizer
+from .semantic_cache import SemanticCache
+from .cross_provider_cache import CrossProviderCache
+from .prefill import detect_prefill, inject_prefill, strip_prefill_from_response, OutputSchemaValidator
+from .output_repair import OutputCorrector, extract_json_from_text
+from .pii import PIIMasker
+from .analytics import StreamingAnalyticsCollector, wrap_stream_with_analytics
 
 
 class OptimizedClient:
@@ -79,12 +88,70 @@ class OptimizedClient:
         # Reliability
         max_retries: int = 3,
         retry_base_delay: float = 1.0,   # seconds; doubles on each retry
+        # Budget enforcement
+        max_cost_per_request: Optional[float] = None,
+        monthly_budget: Optional[float] = None,
+        total_budget: Optional[float] = None,
+        on_budget_warning: Optional[callable] = None,
+        persist_budget: Optional[str] = None,
+        # Output cache
+        enable_output_cache: bool = False,
+        output_cache_backend: str = "memory",
+        output_cache_ttl: int = 3600,
+        output_cache_max_size: int = 1000,
+        output_cache_path: str = "llm_cache.db",
+        # History summarization
+        enable_history_summarization: bool = False,
+        history_summarization_threshold: int = 10,
+        history_keep_recent: int = 4,
+        # Semantic cache
+        enable_semantic_cache: bool = False,
+        semantic_cache_threshold: float = 0.92,
+        semantic_cache_ttl: int = 3600,
+        # Cross-provider cache
+        enable_cross_provider_cache: bool = False,
+        cross_provider_cache_ttl: int = 3600,
+        # Prefill / forced output
+        enable_prefill: bool = False,
+        # Structured output auto-correction
+        enable_output_correction: bool = False,
+        # PII masking
+        enable_pii_masking: bool = False,
+        pii_mask_names: bool = False,
+        pii_restore_in_response: bool = True,
+        pii_custom_patterns: Optional[dict] = None,
+        # Streaming analytics
+        streaming_analytics_callback: Optional[callable] = None,
         # Batching
         enable_batching: bool = False,
         batch_default_model: Optional[str] = None,
     ):
         self._anthropic = anthropic_client
         self._bedrock = bedrock_client
+
+        # Budget guard
+        self.budget = BudgetGuard(
+            max_cost_per_request=max_cost_per_request,
+            monthly_budget=monthly_budget,
+            total_budget=total_budget,
+            on_budget_warning=on_budget_warning,
+            persist_path=persist_budget,
+        ) if any(x is not None for x in [max_cost_per_request, monthly_budget, total_budget]) else None
+
+        # Output cache
+        self.output_cache = OutputCache(
+            backend=output_cache_backend,
+            ttl_seconds=output_cache_ttl,
+            max_size=output_cache_max_size,
+            db_path=output_cache_path,
+        ) if enable_output_cache else None
+
+        # History summarizer
+        self.history_summarizer = HistorySummarizer(
+            client=anthropic_client,
+            threshold=history_summarization_threshold,
+            keep_recent=history_keep_recent,
+        ) if enable_history_summarization else None
         self._openai = openai_client
         self._google = google_client
         self._default_model = default_model
@@ -122,6 +189,32 @@ class OptimizedClient:
 
         self.tracker = CostTracker(persist_path=persist_tracking) if enable_tracking else None
 
+        # Semantic cache
+        self.semantic_cache = SemanticCache(
+            threshold=semantic_cache_threshold,
+            ttl_seconds=semantic_cache_ttl,
+        ) if enable_semantic_cache else None
+
+        # Cross-provider cache
+        self.cross_provider_cache = CrossProviderCache(
+            ttl_seconds=cross_provider_cache_ttl,
+        ) if enable_cross_provider_cache else None
+
+        # Output corrector
+        self.output_corrector = OutputCorrector(
+            client=anthropic_client,
+            enabled=enable_output_correction,
+        ) if enable_output_correction else None
+
+        # PII masker
+        self.pii_masker = PIIMasker(
+            mask_names=pii_mask_names,
+            custom_patterns=pii_custom_patterns,
+        ) if enable_pii_masking else None
+        self._pii_restore = pii_restore_in_response
+        self._enable_prefill = enable_prefill
+        self._streaming_analytics_callback = streaming_analytics_callback
+
         self.batcher = BatchProcessor(
             client=anthropic_client,
             default_model=batch_default_model or default_model or "claude-haiku-4-5-20251001",
@@ -156,6 +249,60 @@ class OptimizedClient:
         optimizations: list[str] = []
         tokens_saved_total = 0
 
+        # History summarization — compress old turns before routing/optimizing
+        if self.history_summarizer:
+            messages, was_summarized = self.history_summarizer.maybe_summarize(messages)
+            if was_summarized:
+                optimizations.append("history_summarization")
+
+        # PII masking — mask before any caching or routing
+        _pii_session = None
+        if self.pii_masker:
+            messages, system, _pii_session = self.pii_masker.mask_messages(messages, system)
+            optimizations.append("pii_masking")
+
+        # Semantic cache check
+        if self.semantic_cache:
+            _sem_hit = self.semantic_cache.get(messages, system)
+            if _sem_hit:
+                optimizations.append("semantic_cache_hit")
+                return _sem_hit  # return cached entry directly
+
+        # Cross-provider cache check
+        _cp_key = None
+        if self.cross_provider_cache:
+            _cp_key = self.cross_provider_cache.make_key(messages, system)
+            _cp_hit = self.cross_provider_cache.get(_cp_key)
+            if _cp_hit:
+                optimizations.append("cross_provider_cache_hit")
+                return _cp_hit
+
+        # Output cache check — return cached response at zero cost
+        if self.output_cache:
+            _cache_key = make_cache_key(
+                model_id=model or "auto",
+                messages=messages,
+                system=system,
+                temperature=temperature,
+            )
+            _cached = self.output_cache.get(_cache_key)
+            if _cached:
+                optimizations.append("output_cache_hit")
+                if self.tracker:
+                    self.tracker.record(
+                        model_key=model or "cached",
+                        input_tokens=_cached.input_tokens,
+                        output_tokens=_cached.output_tokens,
+                        cached_tokens=0,
+                        request_type="output_cached",
+                        optimizations_applied=optimizations,
+                        cost_saved=_cached.original_cost,
+                        tags=tags,
+                    )
+                return _cached
+        else:
+            _cache_key = None
+
         messages, tokens_saved_total, optimizations = self._apply_pre_optimizations(
             messages, documents, optimizations, tokens_saved_total
         )
@@ -163,6 +310,25 @@ class OptimizedClient:
         model_key, model_config, _ = self._resolve_model(
             messages, model, complexity, force_provider, optimizations
         )
+
+        # Prefill injection — auto-detect output format and inject assistant prefill
+        _prefill = None
+        if self._enable_prefill:
+            _prefill = detect_prefill(
+                system=system,
+                output_schema=kwargs.get("output_schema"),
+                explicit_prefill=kwargs.pop("prefill", None),
+            )
+            if _prefill:
+                messages = inject_prefill(messages, _prefill)
+                optimizations.append("prefill_injection")
+
+        # Budget check — raises BudgetExceededError before API call
+        # Happens after model resolution so we know the exact model pricing
+        if self.budget:
+            _est = self.estimate_cost(messages, system, model_key)
+            _est_cost = _est.get("estimated_cost_usd", 0.0)
+            self.budget.check(_est_cost)
 
         messages, system_blocks = self.cache_manager.prepare_anthropic_messages(
             messages=messages, system=system
@@ -182,6 +348,77 @@ class OptimizedClient:
         latency_ms = (time.time() - start_time) * 1000
         if self.tracker and response:
             inp, out, cached = self._extract_usage(response)
+
+            # Extract response text for post-processing
+            _response_text = extract_text_from_response(response)
+
+            # Strip prefill echo from response
+            if _prefill and _response_text:
+                _response_text = strip_prefill_from_response(_response_text, _prefill)
+
+            # Output auto-correction (JSON repair)
+            if self.output_corrector and _response_text:
+                _corrected, _was_corrected = self.output_corrector.correct(
+                    _response_text,
+                    output_schema=kwargs.get("output_schema"),
+                )
+                if _was_corrected:
+                    optimizations.append("output_correction")
+                    _response_text = _corrected
+
+            # PII restore in response
+            if self.pii_masker and _pii_session and self._pii_restore and _response_text:
+                _response_text = self.pii_masker.restore_response(_response_text, _pii_session)
+
+            # Store in semantic cache
+            if self.semantic_cache and response:
+                _model_obj = MODELS.get(model_key)
+                _cost = _model_obj.estimate_cost(inp, out) if _model_obj else 0.0
+                self.semantic_cache.set(
+                    messages=messages,
+                    response_text=_response_text,
+                    model=model_key,
+                    input_tokens=inp,
+                    output_tokens=out,
+                    original_cost=_cost,
+                    system=system,
+                )
+
+            # Store in cross-provider cache
+            if self.cross_provider_cache and response and _cp_key:
+                _model_obj = MODELS.get(model_key)
+                _cost = _model_obj.estimate_cost(inp, out) if _model_obj else 0.0
+                self.cross_provider_cache.set(
+                    key=_cp_key,
+                    response_text=_response_text,
+                    source_provider=model_config.provider.value,
+                    source_model=model_key,
+                    input_tokens=inp,
+                    output_tokens=out,
+                    original_cost=_cost,
+                )
+
+            # Store in output cache for future identical requests
+            if self.output_cache and _cache_key and response:
+                import time as _time
+                _text = extract_text_from_response(response)
+                _model_obj = MODELS.get(model_key)
+                _cost = _model_obj.estimate_cost(inp, out) if _model_obj else 0.0
+                self.output_cache.set(_cache_key, CachedResponse(
+                    content=_text,
+                    model=model_key,
+                    input_tokens=inp,
+                    output_tokens=out,
+                    cached_at=_time.time(),
+                    original_cost=_cost,
+                ))
+
+            # Record actual cost against budget
+            if self.budget:
+                _model_obj = MODELS.get(model_key)
+                _actual_cost = _model_obj.estimate_cost(inp, out, cached) if _model_obj else 0.0
+                self.budget.record(_actual_cost)
+
             self.tracker.record(
                 model_key=model_key,
                 input_tokens=inp,
@@ -230,6 +467,54 @@ class OptimizedClient:
         Supported providers: Anthropic, OpenAI
         Not yet supported: Google (Gemini streaming uses a different API surface)
         """
+        # PII masking — mask before any caching or routing
+        _pii_session = None
+        if self.pii_masker:
+            messages, system, _pii_session = self.pii_masker.mask_messages(messages, system)
+            optimizations.append("pii_masking")
+
+        # Semantic cache check
+        if self.semantic_cache:
+            _sem_hit = self.semantic_cache.get(messages, system)
+            if _sem_hit:
+                optimizations.append("semantic_cache_hit")
+                return _sem_hit  # return cached entry directly
+
+        # Cross-provider cache check
+        _cp_key = None
+        if self.cross_provider_cache:
+            _cp_key = self.cross_provider_cache.make_key(messages, system)
+            _cp_hit = self.cross_provider_cache.get(_cp_key)
+            if _cp_hit:
+                optimizations.append("cross_provider_cache_hit")
+                return _cp_hit
+
+        # Output cache check — return cached response at zero cost
+        if self.output_cache:
+            _cache_key = make_cache_key(
+                model_id=model or "auto",
+                messages=messages,
+                system=system,
+                temperature=temperature,
+            )
+            _cached = self.output_cache.get(_cache_key)
+            if _cached:
+                optimizations.append("output_cache_hit")
+                if self.tracker:
+                    self.tracker.record(
+                        model_key=model or "cached",
+                        input_tokens=_cached.input_tokens,
+                        output_tokens=_cached.output_tokens,
+                        cached_tokens=0,
+                        request_type="output_cached",
+                        optimizations_applied=optimizations,
+                        cost_saved=_cached.original_cost,
+                        tags=tags,
+                    )
+                return _cached
+        else:
+            _cache_key = None
+
         messages, tokens_saved_total, optimizations = self._apply_pre_optimizations(
             messages, documents, [], 0
         )
@@ -237,6 +522,25 @@ class OptimizedClient:
         model_key, model_config, _ = self._resolve_model(
             messages, model, complexity, force_provider, optimizations
         )
+
+        # Prefill injection — auto-detect output format and inject assistant prefill
+        _prefill = None
+        if self._enable_prefill:
+            _prefill = detect_prefill(
+                system=system,
+                output_schema=kwargs.get("output_schema"),
+                explicit_prefill=kwargs.pop("prefill", None),
+            )
+            if _prefill:
+                messages = inject_prefill(messages, _prefill)
+                optimizations.append("prefill_injection")
+
+        # Budget check — raises BudgetExceededError before API call
+        # Happens after model resolution so we know the exact model pricing
+        if self.budget:
+            _est = self.estimate_cost(messages, system, model_key)
+            _est_cost = _est.get("estimated_cost_usd", 0.0)
+            self.budget.check(_est_cost)
 
         messages, system_blocks = self.cache_manager.prepare_anthropic_messages(
             messages=messages, system=system
@@ -271,6 +575,16 @@ class OptimizedClient:
                 "Supported: anthropic, openai, bedrock."
             )
 
+        # Wrap with streaming analytics if callback configured
+        if self._streaming_analytics_callback:
+            from .analytics import wrap_stream_with_analytics
+            _inp_est = self.estimate_cost(messages, system, model_key).get("estimated_input_tokens", 0)
+            result, _collector = wrap_stream_with_analytics(
+                result,
+                model_key=model_key,
+                input_tokens=_inp_est,
+                on_token_event=self._streaming_analytics_callback,
+            )
         return result
 
     # ─── Batch ────────────────────────────────────────────────────────────────
@@ -360,6 +674,48 @@ class OptimizedClient:
             self.tracker.print_summary()
 
     # ─── Internal ─────────────────────────────────────────────────────────────
+
+    def semantic_cache_stats(self) -> dict:
+        if not self.semantic_cache:
+            return {"error": "Semantic cache not enabled. Set enable_semantic_cache=True."}
+        return self.semantic_cache.stats()
+
+    def cross_provider_cache_stats(self) -> dict:
+        if not self.cross_provider_cache:
+            return {"error": "Cross-provider cache not enabled. Set enable_cross_provider_cache=True."}
+        return self.cross_provider_cache.stats()
+
+    def pii_stats(self) -> dict:
+        if not self.pii_masker:
+            return {"error": "PII masking not enabled. Set enable_pii_masking=True."}
+        return self.pii_masker.stats()
+
+    def output_correction_stats(self) -> dict:
+        if not self.output_corrector:
+            return {"error": "Output correction not enabled. Set enable_output_correction=True."}
+        return self.output_corrector.stats()
+
+    def budget_status(self) -> dict:
+        """Return current budget usage and remaining limits."""
+        if not self.budget:
+            return {"error": "Budget enforcement not enabled. Set max_cost_per_request or monthly_budget."}
+        return self.budget.status()
+
+    def reset_budget(self):
+        """Reset budget counters — call at start of new billing period."""
+        if self.budget:
+            self.budget.reset()
+
+    def cache_stats(self) -> dict:
+        """Return output cache hit rate and cost savings."""
+        if not self.output_cache:
+            return {"error": "Output cache not enabled. Set enable_output_cache=True."}
+        return self.output_cache.stats()
+
+    def clear_cache(self):
+        """Clear all output cache entries."""
+        if self.output_cache:
+            self.output_cache.clear()
 
     def _apply_pre_optimizations(self, messages, documents, optimizations, tokens_saved):
         if documents and self.compressor:

@@ -155,14 +155,15 @@
       "output_cost_per_1m": 4.0,
       "cached_input_cost_per_1m": 0.08,
       "context_window": 200000,
-      "supports_caching": false,
+      "supports_caching": true,
       "supports_batch": true,
       "complexity_tiers": [
         "simple",
         "medium"
       ],
       "max_output_tokens": 8192,
-      "notes": "AWS Bedrock list price. Prompt caching not supported on Bedrock. Your account discount applies on top."
+      "notes": "Bedrock prompt caching supported via cachePoint format. Min 4,096 tokens. Auto-translated from cache_control by llm-optimizer. TTL: 5m (default) or 1h (Claude 4.5 models). Automatic caching NOT supported on Bedrock \u2014 explicit checkpoints injected.",
+      "cache_format": "bedrock_cachepoint"
     },
     "bedrock-claude-sonnet-4-5": {
       "model_id": "anthropic.claude-sonnet-4-5-20250929-v1:0",
@@ -172,7 +173,7 @@
       "output_cost_per_1m": 15.0,
       "cached_input_cost_per_1m": 0.3,
       "context_window": 200000,
-      "supports_caching": false,
+      "supports_caching": true,
       "supports_batch": true,
       "complexity_tiers": [
         "simple",
@@ -180,7 +181,8 @@
         "complex"
       ],
       "max_output_tokens": 8192,
-      "notes": "AWS Bedrock list price. Prompt caching not supported on Bedrock. Your account discount applies on top."
+      "notes": "Bedrock prompt caching supported via cachePoint format. Min 4,096 tokens. Auto-translated from cache_control by llm-optimizer. TTL: 5m (default) or 1h (Claude 4.5 models). Automatic caching NOT supported on Bedrock \u2014 explicit checkpoints injected.",
+      "cache_format": "bedrock_cachepoint"
     }
   }
 }

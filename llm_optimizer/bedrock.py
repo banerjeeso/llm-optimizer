@@ -26,9 +26,12 @@ Supports two auth patterns:
 
 Key differences from direct Anthropic API:
   - Auth via AWS IAM, not API keys
-  - Prompt caching (cache_control) NOT supported — stripped automatically
+  - Prompt caching uses Bedrock cachePoint format (not cache_control) — translated automatically
+  - Automatic caching NOT supported on Bedrock — explicit checkpoints injected instead
+  - Min cacheable tokens: 4,096 (vs 1,024 on direct API) for Claude 4.5 models
   - Model IDs use Bedrock format: anthropic.claude-haiku-4-5-20251001-v1:0
   - Batch via Bedrock Batch Inference (not Anthropic Batch API)
+  - TTL preserved correctly (LiteLLM has a bug that strips TTL on Bedrock — this library does not)
 
 Install:
   pip install llm-optimizer[bedrock]
@@ -92,13 +95,34 @@ class BedrockClient:
         profile_name: Optional[str] = None,
         session=None,
         discount_pct: float = 0.0,
+        enable_caching: bool = True,
+        cache_ttl: str = "5m",
     ):
+        """
+        Args:
+            region:         AWS region (default: us-east-1)
+            profile_name:   AWS profile from ~/.aws/config (e.g. "ai-core")
+            session:        Pre-configured boto3.Session — overrides profile_name
+            discount_pct:   Negotiated AWS discount % for cost estimates (e.g. 16.0)
+            enable_caching: Enable Bedrock prompt caching (default: True)
+                            Translates Anthropic cache_control → Bedrock cachePoint format
+                            Injects optimal checkpoints when none present
+            cache_ttl:      Cache TTL — "5m" (default) or "1h"
+                            1h supported on Claude Haiku/Sonnet/Opus 4.5 only
+        """
         self.region = region
         self.discount_pct = discount_pct
         self._profile = profile_name
         self._session = session
         self._runtime = None
         self._boto3 = None
+
+        # Import here to avoid circular imports
+        from .bedrock_cache import BedrockCacheManager
+        self.cache_manager = BedrockCacheManager(
+            enabled=enable_caching,
+            ttl=cache_ttl,
+        )
 
     # ── Credential chain ───────────────────────────────────────────────────────
 
@@ -166,28 +190,48 @@ class BedrockClient:
     ) -> dict:
         """
         Build Bedrock request body.
-        Strips cache_control automatically — Bedrock rejects it.
-        """
-        clean_messages = self._strip_cache_control(messages)
 
-        # Resolve system prompt from str or Anthropic blocks list
+        Translates Anthropic cache_control blocks → Bedrock cachePoint blocks.
+        Injects optimal cachePoint checkpoints when none present.
+
+        Note: Bedrock uses cachePoint (not cache_control).
+        Bedrock does NOT support automatic caching — we inject explicit checkpoints.
+        TTL is preserved correctly (LiteLLM strips it — this library does not).
+        """
+        # Translate/inject Bedrock cachePoint blocks
+        prepared_messages, prepared_system = self.cache_manager.prepare(
+            messages=messages,
+            system=system,
+        )
+
+        # Build system text from translated blocks
         system_text = ""
-        if system:
-            if isinstance(system, str):
-                system_text = system
-            elif isinstance(system, list):
+        system_blocks_for_body = None
+        if prepared_system:
+            # Check if any block is a cachePoint — if so, keep as blocks list
+            has_cache_points = any(
+                isinstance(b, dict) and "cachePoint" in b
+                for b in prepared_system
+            )
+            if has_cache_points:
+                system_blocks_for_body = prepared_system
+            else:
                 system_text = " ".join(
-                    b.get("text", "") for b in system
+                    b.get("text", "") for b in prepared_system
                     if isinstance(b, dict) and b.get("type") == "text"
                 )
 
         body: dict[str, Any] = {
             "anthropic_version": "bedrock-2023-05-31",
             "max_tokens": max_tokens,
-            "messages": clean_messages,
+            "messages": prepared_messages,
         }
-        if system_text:
+
+        if system_blocks_for_body:
+            body["system"] = system_blocks_for_body
+        elif system_text:
             body["system"] = system_text
+
         if temperature > 0:
             body["temperature"] = temperature
 
@@ -226,12 +270,9 @@ class BedrockClient:
     @staticmethod
     def _strip_cache_control(messages: list[dict]) -> list[dict]:
         """
-        Strip cache_control from all message content blocks.
-
-        Why: Bedrock's Claude API does not support prompt caching.
-        Sending cache_control causes a validation error.
-        The library strips it silently so callers don't need to branch
-        their code between Anthropic and Bedrock.
+        Fallback: strip cache_control blocks when caching is disabled.
+        When caching is enabled, bedrock_cache.py translates cache_control
+        to Bedrock's cachePoint format instead of stripping it.
         """
         clean = []
         for msg in messages:
@@ -306,19 +347,34 @@ def make_bedrock_client(
     profile_name: Optional[str] = None,
     region: str = "us-east-1",
     discount_pct: float = 0.0,
+    enable_caching: bool = True,
+    cache_ttl: str = "5m",
 ) -> BedrockClient:
     """
-    Convenience factory matching the proposed OptimizedClient shorthand.
+    Convenience factory for BedrockClient.
+
+    Prompt caching is enabled by default. The library automatically:
+      - Translates Anthropic cache_control → Bedrock cachePoint format
+      - Injects optimal checkpoints when none are present
+      - Preserves TTL correctly (1h supported for Claude 4.5 models)
 
     Usage:
-        # Profile-based (most Saks devs)
+        # Profile-based (most team devs) — caching on by default
         bedrock = make_bedrock_client(profile_name="ai-core", discount_pct=16.0)
+
+        # With 1-hour TTL (Claude 4.5 models only)
+        bedrock = make_bedrock_client(profile_name="ai-core", cache_ttl="1h")
 
         # Env-var / IAM role (CI/CD, Lambda)
         bedrock = make_bedrock_client()
+
+        # Disable caching explicitly
+        bedrock = make_bedrock_client(enable_caching=False)
     """
     return BedrockClient(
         region=region,
         profile_name=profile_name,
         discount_pct=discount_pct,
+        enable_caching=enable_caching,
+        cache_ttl=cache_ttl,
     )

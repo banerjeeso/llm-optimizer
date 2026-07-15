@@ -31,7 +31,7 @@ from .caching import CacheManager, build_cached_system_prompt
 from .batcher import BatchProcessor, BatchRequest, BatchResult
 from .tracker import CostTracker, UsageRecord, estimate_tokens
 
-__version__ = "0.3.0"
+__version__ = "0.5.0"
 __author__ = "Your Team"
 
 __all__ = [
@@ -59,6 +59,24 @@ __all__ = [
     "BedrockClient",
     "BedrockResponse",
     "make_bedrock_client",
+    "BedrockCacheManager",
+    "make_cache_point",
+    "SemanticCache",
+    "CrossProviderCache",
+    "OutputSchemaValidator",
+    "OutputCorrector",
+    "PIIMasker",
+    "MaskingSession",
+    "StreamingAnalyticsCollector",
+    "StreamAnalytics",
+    "wrap_stream_with_analytics",
+    "FewShotSelector",
+    "FewShotExample",
+    "BudgetGuard",
+    "BudgetExceededError",
+    "OutputCache",
+    "CachedResponse",
+    "HistorySummarizer",
     "UsageRecord",
     "estimate_tokens",
 ]
