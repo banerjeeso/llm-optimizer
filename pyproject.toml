@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llm-optimizer"
-version = "0.4.0"
+version = "0.4.1"
 description = "Reduce LLM API costs by up to 90% — prompt caching, smart routing, batch processing, and more"
 readme = "README.md"
 license = { text = "MIT" }

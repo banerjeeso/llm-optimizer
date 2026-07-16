@@ -827,6 +827,10 @@ tests/
 
 ## Changelog
 
+### v0.4.1
+
+- BUG FIX
+
 ### v0.4.0 — Major Feature Release
 
 **Cost Reduction**
