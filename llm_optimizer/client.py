@@ -871,7 +871,7 @@ class OptimizedClient:
             raise RuntimeError(
                 "No Bedrock client. Pass bedrock_client=BedrockClient() to OptimizedClient.\n"
                 "from llm_optimizer.bedrock import BedrockClient\n"
-                "bedrock = BedrockClient(region='us-east-1', profile_name='ai-core')"
+                "bedrock = BedrockClient(region='us-east-1', profile_name='my-profile')"
             )
         return self._bedrock.messages.create(
             model=model_config.model_id,

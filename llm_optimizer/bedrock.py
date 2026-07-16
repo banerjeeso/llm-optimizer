@@ -11,7 +11,7 @@ Supports two auth patterns:
     from llm_optimizer.bedrock import BedrockClient
 
     client = OptimizedClient(
-        bedrock_client=BedrockClient(profile_name="ai-core", region="us-east-1"),
+        bedrock_client=BedrockClient(profile_name="my-profile", region="us-east-1"),
         preferred_provider=Provider.BEDROCK,
     )
 
@@ -83,7 +83,7 @@ class BedrockClient:
 
     Args:
         region:        AWS region (default: us-east-1)
-        profile_name:  AWS profile from ~/.aws/config (e.g. "ai-core")
+        profile_name:  AWS profile from ~/.aws/config (e.g. "my-profile")
         session:       Pre-configured boto3.Session — overrides profile_name
         discount_pct:  Your negotiated AWS discount (e.g. 16.0).
                        Applied to cost estimates only — does not affect API calls.
@@ -101,7 +101,7 @@ class BedrockClient:
         """
         Args:
             region:         AWS region (default: us-east-1)
-            profile_name:   AWS profile from ~/.aws/config (e.g. "ai-core")
+            profile_name:   AWS profile from ~/.aws/config (e.g. "my-profile")
             session:        Pre-configured boto3.Session — overrides profile_name
             discount_pct:   Negotiated AWS discount % for cost estimates (e.g. 16.0)
             enable_caching: Enable Bedrock prompt caching (default: True)
@@ -360,10 +360,10 @@ def make_bedrock_client(
 
     Usage:
         # Profile-based (most team devs) — caching on by default
-        bedrock = make_bedrock_client(profile_name="ai-core", discount_pct=16.0)
+        bedrock = make_bedrock_client(profile_name="my-profile", discount_pct=16.0)
 
         # With 1-hour TTL (Claude 4.5 models only)
-        bedrock = make_bedrock_client(profile_name="ai-core", cache_ttl="1h")
+        bedrock = make_bedrock_client(profile_name="my-profile", cache_ttl="1h")
 
         # Env-var / IAM role (CI/CD, Lambda)
         bedrock = make_bedrock_client()

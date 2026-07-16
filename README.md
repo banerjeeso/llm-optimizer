@@ -461,7 +461,7 @@ from llm_optimizer.bedrock import make_bedrock_client
 
 # Option 1 — AWS profile (local dev)
 bedrock = make_bedrock_client(
-    profile_name="ai-core",
+    profile_name="my-profile",
     region="us-east-1",
     discount_pct=16.0,       # apply your negotiated AWS discount to cost estimates
     enable_caching=True,     # auto-translates cache_control → Bedrock cachePoint
@@ -827,6 +827,10 @@ tests/
 
 ## Changelog
 
+### v0.4.2
+
+- Sanitize docs, examples, and tests — replace org-specific AWS profile names with generic placeholders; Bedrock integration tests read `AWS_PROFILE` from the environment
+
 ### v0.4.1
 
 - BUG FIX
@@ -855,7 +859,7 @@ tests/
 - Bedrock cachePoint translation — auto-translates Anthropic `cache_control` → Bedrock `cachePoint` format
 - TTL preservation on Bedrock — fixes open LiteLLM bug (GitHub #20326, Feb 2026)
 - `make_bedrock_client()` accepts `enable_caching` and `cache_ttl` parameters
-- Correct model IDs matching `ai-core` account (`anthropic.claude-haiku-4-5-20251001-v1:0`)
+- Correct model IDs matching Bedrock account format (`anthropic.claude-haiku-4-5-20251001-v1:0`)
 - Negotiated discount support via `discount_pct`
 
 **Test suite: 172 tests — all unit tests, no real API calls required**
@@ -877,7 +881,7 @@ tests/
 ### v0.3.0
 
 - AWS Bedrock support — `BedrockClient` and `make_bedrock_client()` factory
-- Both auth patterns — AWS profile (`profile_name="ai-core"`) and env vars / IAM role
+- Both auth patterns — AWS profile (`profile_name="my-profile"`) and env vars / IAM role
 - Bedrock pricing added to `pricing.json` with negotiated discount support
 - `Provider.BEDROCK` added, Bedrock entries in `TIER_DEFAULTS` for all complexity tiers
 - Note: Bedrock cachePoint translation was added in v0.4.0; this version stripped `cache_control` silently

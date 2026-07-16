@@ -582,9 +582,9 @@ class TestBedrockClient:
 
     def test_instantiates_with_profile(self):
         from llm_optimizer.bedrock import BedrockClient
-        c = BedrockClient(region="us-east-1", profile_name="ai-core")
+        c = BedrockClient(region="us-east-1", profile_name="my-profile")
         assert c.region == "us-east-1"
-        assert c._profile == "ai-core"
+        assert c._profile == "my-profile"
 
     def test_instantiates_without_profile(self):
         """Env vars / IAM role path — zero config."""
@@ -673,7 +673,7 @@ class TestBedrockClient:
         import json
         from unittest.mock import MagicMock
 
-        bedrock = BedrockClient(region="us-east-1", profile_name="ai-core")
+        bedrock = BedrockClient(region="us-east-1", profile_name="my-profile")
         bedrock._runtime = self._mock_runtime("Classified as SPAM")
 
         client = OptimizedClient(
@@ -699,8 +699,8 @@ class TestBedrockClient:
 
     def test_make_bedrock_client_factory(self):
         from llm_optimizer.bedrock import make_bedrock_client
-        c = make_bedrock_client(profile_name="ai-core", discount_pct=16.0)
-        assert c._profile == "ai-core"
+        c = make_bedrock_client(profile_name="my-profile", discount_pct=16.0)
+        assert c._profile == "my-profile"
         assert c.discount_pct == 16.0
 
     def test_make_bedrock_client_no_args(self):
@@ -1223,7 +1223,7 @@ class TestBedrockCacheTranslation:
         """make_bedrock_client factory passes cache params through."""
         from llm_optimizer.bedrock import make_bedrock_client
         client = make_bedrock_client(
-            profile_name="ai-core",
+            profile_name="my-profile",
             enable_caching=True,
             cache_ttl="1h",
         )
