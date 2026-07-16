@@ -30,6 +30,19 @@ from .optimizer import PromptOptimizer, DocumentCompressor, OptimizationResult
 from .caching import CacheManager, build_cached_system_prompt
 from .batcher import BatchProcessor, BatchRequest, BatchResult
 from .tracker import CostTracker, UsageRecord, estimate_tokens
+from .budget import BudgetGuard, BudgetExceededError
+from .cache import OutputCache, CachedResponse
+from .history import HistorySummarizer
+from .bedrock import BedrockClient, BedrockResponse, make_bedrock_client
+from .bedrock_cache import BedrockCacheManager, make_cache_point
+from .semantic_cache import SemanticCache
+from .cross_provider_cache import CrossProviderCache
+from .prefill import detect_prefill, inject_prefill, OutputSchemaValidator
+from .output_repair import OutputCorrector
+from .pii import PIIMasker, MaskingSession
+from .analytics import StreamingAnalyticsCollector, StreamAnalytics, wrap_stream_with_analytics
+from .few_shot import FewShotSelector, FewShotExample
+from .streaming import StreamResult
 
 __version__ = "0.5.0"
 __author__ = "Your Team"

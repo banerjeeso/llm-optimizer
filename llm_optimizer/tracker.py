@@ -206,7 +206,7 @@ class CostTracker:
         """Pretty-print usage summary to console."""
         s = self.summary()
         print("\n" + "=" * 55)
-        print("  💰 LLM Cost Optimizer — Usage Summary")
+        print("  $ LLM Cost Optimizer — Usage Summary")
         print("=" * 55)
         print(f"  Total Requests   : {s['total_requests']}")
         print(f"  Total Cost       : ${s['total_cost_usd']:.6f}")

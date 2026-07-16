@@ -296,7 +296,6 @@ class OptimizedClient:
                         cached_tokens=0,
                         request_type="output_cached",
                         optimizations_applied=optimizations,
-                        cost_saved=_cached.original_cost,
                         tags=tags,
                     )
                 return _cached
@@ -508,7 +507,6 @@ class OptimizedClient:
                         cached_tokens=0,
                         request_type="output_cached",
                         optimizations_applied=optimizations,
-                        cost_saved=_cached.original_cost,
                         tags=tags,
                     )
                 return _cached
